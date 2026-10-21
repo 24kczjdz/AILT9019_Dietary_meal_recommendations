@@ -1,16 +1,21 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Textarea } from "@/components/ui/textarea";
 import { Plate } from "@/components/plate";
+import { ProfileSheet } from "@/components/profile-sheet";
 import { formatAmount } from "@/lib/nutrition";
-import { searchMeals, type Hit, type MealSearch } from "@/lib/match";
+import { searchMeals, type Hit, type MealSearch, type PlanDay } from "@/lib/match";
 import { scaleIngredients } from "@/lib/nutrition";
 import { displayedNutrition } from "@/lib/nutrition";
-import type { Recipe } from "@/lib/types";
+import { EMPTY_PROFILE } from "@/lib/profile";
+import { getRecipe } from "@/lib/recipes";
+import { linesFromRecipe, mergeLines, shoppingText } from "@/lib/shopping";
+import { loadFavorites, loadKitchen, loadProfile, saveFavorites, saveKitchen, saveProfile } from "@/lib/storage";
+import type { Profile, Recipe, ShoppingLine } from "@/lib/types";
 
 const PRESETS = [
   ["vegetarian", "Vegetarian"],
@@ -64,6 +69,32 @@ export function Demo() {
   const [checked, setChecked] = useState<Record<string, boolean>>({});
   const [cookStep, setCookStep] = useState<number | null>(null);
   const [copied, setCopied] = useState(false);
+  const [profile, setProfile] = useState<Profile>(EMPTY_PROFILE);
+  const [useSaved, setUseSaved] = useState(true);
+  const [favorites, setFavorites] = useState<string[]>([]);
+  const [kitchen, setKitchen] = useState<ShoppingLine[]>([]);
+  const [ready, setReady] = useState(false);
+  const [notice, setNotice] = useState("");
+  const [view, setView] = useState<"ask" | "kitchen" | "saved">("ask");
+
+  useEffect(() => {
+    setProfile(loadProfile());
+    setFavorites(loadFavorites());
+    setKitchen(loadKitchen());
+    setReady(true);
+  }, []);
+
+  useEffect(() => {
+    if (ready) saveProfile(profile);
+  }, [profile, ready]);
+
+  useEffect(() => {
+    if (ready) saveFavorites(favorites);
+  }, [favorites, ready]);
+
+  useEffect(() => {
+    if (ready) saveKitchen(kitchen);
+  }, [kitchen, ready]);
 
   const detail = useMemo(() => {
     if (!selected) return null;
@@ -79,7 +110,8 @@ export function Demo() {
     setText(nextText);
     setPresets(nextPresets);
     setPantry(nextPantry);
-    setResult(searchMeals(nextText, nextPresets, nextPantry));
+    setResult(searchMeals(nextText, nextPresets, nextPantry, useSaved ? profile : null));
+    setView("ask");
     setSelected(null);
     setCookStep(null);
     setScale(1);
@@ -100,18 +132,51 @@ export function Demo() {
     setCopied(true);
   }
 
+  function toggleFavorite(id: string) {
+    setFavorites((current) => (current.includes(id) ? current.filter((item) => item !== id) : [...current, id]));
+  }
+
+  function addLines(lines: ShoppingLine[], message: string) {
+    setKitchen((current) => mergeLines(current, lines));
+    setNotice(message);
+    setView("kitchen");
+  }
+
+  const planLines = useMemo(() => {
+    if (!result?.plan) return [];
+    return result.plan.reduce<ShoppingLine[]>(
+      (lines, day) =>
+        day.meals.reduce(
+          (dayLines, meal) => mergeLines(dayLines, linesFromRecipe(meal.hit.recipe, meal.scale)),
+          lines,
+        ),
+      [],
+    );
+  }, [result]);
+
   return (
     <div className="mx-auto flex w-full max-w-6xl flex-1 flex-col px-4 pb-16 pt-5 sm:px-6">
-      <header className="flex items-center justify-between gap-4">
-        <a href="#ask" className="font-heading text-2xl tracking-tight">
+      <header className="no-print flex items-center justify-between gap-4">
+        <button type="button" className="font-heading text-2xl tracking-tight" onClick={() => setView("ask")}>
           Mise
-        </a>
-        <p className="hidden text-sm text-muted-foreground sm:block">
-          A dietary goal, turned into a plate you can cook.
-        </p>
+        </button>
+        <nav className="flex items-center gap-2 text-sm">
+          <button type="button" className={view === "ask" ? "font-medium" : "text-muted-foreground"} onClick={() => setView("ask")}>
+            Ask
+          </button>
+          <button type="button" className={view === "kitchen" ? "font-medium" : "text-muted-foreground"} onClick={() => setView("kitchen")}>
+            Kitchen
+          </button>
+          <button type="button" className={view === "saved" ? "font-medium" : "text-muted-foreground"} onClick={() => setView("saved")}>
+            Saved
+          </button>
+          <ProfileSheet profile={profile} onChange={setProfile} />
+        </nav>
       </header>
 
-      <section className="mt-10 grid items-end gap-8 lg:grid-cols-[1.3fr_0.7fr]">
+      {view === "ask" && (
+      <>
+      <section className="no-print mt-10 grid items-end gap-8 lg:grid-cols-[1.3fr_0.7fr]">
         <div>
           <p className="text-sm font-medium tracking-[0.16em] text-primary uppercase">Demo library · 24 plates</p>
           <h1 className="mt-3 max-w-xl text-5xl leading-[0.95] tracking-tight text-balance sm:text-7xl">
@@ -129,7 +194,7 @@ export function Demo() {
         </div>
       </section>
 
-      <section id="ask" className="mt-10 rounded-[2rem] border bg-card p-4 shadow-sm sm:p-6">
+      <section id="ask" className="no-print mt-10 rounded-[2rem] border bg-card p-4 shadow-sm sm:p-6">
         <label htmlFor="goal" className="font-heading text-2xl tracking-tight">
           What should this meal do?
         </label>
@@ -173,6 +238,10 @@ export function Demo() {
             );
           })}
         </div>
+        <label className="mt-5 flex items-center gap-2 text-sm">
+          <Checkbox checked={useSaved} onCheckedChange={(value) => setUseSaved(value === true)} />
+          Use saved diet, allergies, and plan calories
+        </label>
         <div className="mt-5 flex flex-col gap-3 sm:flex-row">
           <Button type="button" className="h-12 rounded-full px-6 text-base" onClick={() => run()}>
             Find meals
@@ -201,7 +270,7 @@ export function Demo() {
       </section>
 
       {result && (
-        <section className="mt-8" aria-live="polite">
+        <section className="no-print mt-8" aria-live="polite">
           <ConstraintRow result={result} />
           {result.warnings.map((warning) => (
             <aside key={warning.title} className="mt-4 rounded-2xl border border-destructive/30 bg-destructive/5 p-4">
@@ -267,6 +336,11 @@ export function Demo() {
                       </article>
                     ))}
                   </div>
+                  <PlanShopping
+                    plan={result.plan}
+                    lines={planLines}
+                    onAdd={() => addLines(planLines, "The plan’s ingredients are on the kitchen list.")}
+                  />
                 </div>
               )}
 
@@ -300,7 +374,13 @@ export function Demo() {
               )}
               <div className="mt-4 grid gap-4">
                 {result.matches.map((hit) => (
-                  <MealCard key={hit.recipe.id} hit={hit} onOpen={() => openHit(hit)} />
+                  <MealCard
+                    key={hit.recipe.id}
+                    hit={hit}
+                    saved={favorites.includes(hit.recipe.id)}
+                    onSave={() => toggleFavorite(hit.recipe.id)}
+                    onOpen={() => openHit(hit)}
+                  />
                 ))}
               </div>
               {result.near.length > 0 && (
@@ -308,7 +388,14 @@ export function Demo() {
                   <h3 className="font-heading text-2xl">Closest plates that miss one rule</h3>
                   <div className="mt-3 grid gap-4">
                     {result.near.map((hit) => (
-                      <MealCard key={hit.recipe.id} hit={hit} muted onOpen={() => openHit(hit)} />
+                      <MealCard
+                        key={hit.recipe.id}
+                        hit={hit}
+                        muted
+                        saved={favorites.includes(hit.recipe.id)}
+                        onSave={() => toggleFavorite(hit.recipe.id)}
+                        onOpen={() => openHit(hit)}
+                      />
                     ))}
                   </div>
                 </div>
@@ -317,9 +404,43 @@ export function Demo() {
           )}
         </section>
       )}
+      </>
+      )}
 
-      {selected && detail && (
-        <section className="mt-8 rounded-[2rem] border bg-card p-4 sm:p-6">
+      {view === "kitchen" && (
+        <KitchenList
+          lines={kitchen}
+          notice={notice}
+          onToggle={(id, checked) => setKitchen((current) => current.map((line) => (line.id === id ? { ...line, checked } : line)))}
+          onClearChecked={() => setKitchen((current) => current.filter((line) => !line.checked))}
+          onClear={() => setKitchen([])}
+        />
+      )}
+
+      {view === "saved" && (
+        <SavedMeals
+          ids={favorites}
+          onOpen={(id) => {
+            const recipe = getRecipe(id);
+            if (!recipe) return;
+            const hit = result?.matches.find((item) => item.recipe.id === id) ?? result?.near.find((item) => item.recipe.id === id);
+            openHit(
+              hit ?? {
+                recipe,
+                nutrition: displayedNutrition(recipe.ingredients).total,
+                reasons: recipe.diets,
+                misses: [],
+                score: 0,
+              },
+            );
+            setView("ask");
+          }}
+          onRemove={toggleFavorite}
+        />
+      )}
+
+      {selected && detail && view === "ask" && (
+        <section id="recipe-sheet" className="mt-8 rounded-[2rem] border bg-card p-4 sm:p-6">
           <div className="flex flex-wrap items-start justify-between gap-3">
             <div>
               <button type="button" className="text-sm text-primary" onClick={() => setSelected(null)}>
@@ -362,6 +483,19 @@ export function Demo() {
             </Button>
             <Button className="rounded-full" onClick={copyRecipe}>
               {copied ? "Copied" : "Copy recipe"}
+            </Button>
+            <Button variant="outline" className="rounded-full" onClick={() => window.print()}>
+              Print or save PDF
+            </Button>
+            <Button
+              variant="outline"
+              className="rounded-full"
+              onClick={() => addLines(linesFromRecipe(selected.recipe, scale), `${selected.recipe.title} is on the kitchen list.`)}
+            >
+              Add to kitchen
+            </Button>
+            <Button variant="outline" className="rounded-full" onClick={() => toggleFavorite(selected.recipe.id)}>
+              {favorites.includes(selected.recipe.id) ? "Saved" : "Save meal"}
             </Button>
           </div>
 
@@ -458,11 +592,11 @@ export function Demo() {
         </section>
       )}
 
-      <footer className="mt-12 border-t pt-6 text-sm leading-relaxed text-muted-foreground">
+      <footer className="no-print mt-12 border-t pt-6 text-sm leading-relaxed text-muted-foreground">
         Mise does not diagnose, prescribe, or replace a doctor or dietitian. Nutrition values are estimates from this
         demo’s ingredient table. Allergies are “not found on the ingredient line,” not a guarantee. Extreme daily
-        targets under 1,200 kcal are refused. Photo and barcode lookup are not in this slice — use the kitchen chips.
-        Nothing you type is sent to a model; the library lives in the page.
+        targets under 1,200 kcal are refused. Preferences, favorites, and the kitchen list stay in this browser.
+        Photo and barcode lookup is not included — use the ingredient chips. Nothing you type is sent to a model.
       </footer>
     </div>
   );
@@ -521,7 +655,166 @@ function RefusalCard({
   );
 }
 
-function MealCard({ hit, onOpen, muted = false }: { hit: Hit; onOpen: () => void; muted?: boolean }) {
+function PlanShopping({
+  plan,
+  lines,
+  onAdd,
+}: {
+  plan: PlanDay[];
+  lines: ShoppingLine[];
+  onAdd: () => void;
+}) {
+  const titles = plan.flatMap((day) => day.meals.map((meal) => meal.hit.recipe.title));
+  const unique = new Set(titles).size;
+  const reused = lines.filter((line) => line.recipes.length > 1);
+  return (
+    <div className="mt-4 rounded-3xl border bg-card p-4">
+      <h3 className="font-heading text-2xl">One grocery list</h3>
+      <p className="mt-2 text-sm leading-relaxed text-muted-foreground">
+        {unique} different plates across {plan.length} day{plan.length === 1 ? "" : "s"}. The same meal is not repeated
+        until the matching set runs out.
+        {reused.length > 0 ? ` ${reused.length} ingredients show up in more than one plate, so they are bought once.` : ""}
+      </p>
+      <ul className="mt-3 grid gap-1 text-sm sm:grid-cols-2">
+        {lines.slice(0, 8).map((line) => (
+          <li key={line.id}>
+            {formatAmount(line.quantity, line.unit)} {line.name}
+            {line.recipes.length > 1 ? ` · ${line.recipes.length} plates` : ""}
+          </li>
+        ))}
+      </ul>
+      <Button className="mt-4 rounded-full" onClick={onAdd}>
+        Add the whole list to Kitchen
+      </Button>
+    </div>
+  );
+}
+
+function KitchenList({
+  lines,
+  notice,
+  onToggle,
+  onClearChecked,
+  onClear,
+}: {
+  lines: ShoppingLine[];
+  notice: string;
+  onToggle: (id: string, checked: boolean) => void;
+  onClearChecked: () => void;
+  onClear: () => void;
+}) {
+  const aisles = [...new Set(lines.map((line) => line.aisle))];
+  return (
+    <section id="kitchen-sheet" className="mt-10">
+      <h1 className="font-heading text-5xl tracking-tight">Kitchen list</h1>
+      <p className="mt-3 max-w-xl text-muted-foreground">
+        Ingredients from a plate or a plan, merged when the unit matches. Checked items stay on this device until you clear them.
+      </p>
+      {notice && <p className="mt-3 text-sm text-primary">{notice}</p>}
+      {lines.length === 0 ? (
+        <p className="mt-8 rounded-3xl border bg-card p-6">The list is empty. Open a recipe, or build a plan, and add its ingredients.</p>
+      ) : (
+        <>
+          <div className="mt-4 flex flex-wrap gap-2">
+            <Button className="rounded-full" onClick={() => navigator.clipboard.writeText(shoppingText(lines))}>
+              Copy list
+            </Button>
+            <Button variant="outline" className="rounded-full" onClick={() => window.print()}>
+              Print or save PDF
+            </Button>
+            <Button variant="outline" className="rounded-full" onClick={onClearChecked}>
+              Remove checked
+            </Button>
+            <Button variant="outline" className="rounded-full" onClick={onClear}>
+              Clear list
+            </Button>
+          </div>
+          <div className="mt-6 grid gap-4">
+            {aisles.map((aisle) => (
+              <div key={aisle} className="rounded-3xl border bg-card p-4">
+                <h2 className="font-heading text-2xl">{aisle}</h2>
+                <ul className="mt-3 space-y-3">
+                  {lines
+                    .filter((line) => line.aisle === aisle)
+                    .map((line) => (
+                      <li key={line.id} className="flex items-start gap-3">
+                        <Checkbox
+                          id={`kitchen-${line.id}`}
+                          checked={line.checked}
+                          onCheckedChange={(value) => onToggle(line.id, value === true)}
+                          className="mt-1"
+                        />
+                        <label htmlFor={`kitchen-${line.id}`} className={line.checked ? "text-muted-foreground line-through" : ""}>
+                          {formatAmount(line.quantity, line.unit)} {line.name}
+                          <span className="block text-xs text-muted-foreground">
+                            {line.recipes.length > 1 ? `Buy once · ${line.recipes.join(", ")}` : line.recipes[0]}
+                          </span>
+                        </label>
+                      </li>
+                    ))}
+                </ul>
+              </div>
+            ))}
+          </div>
+        </>
+      )}
+    </section>
+  );
+}
+
+function SavedMeals({
+  ids,
+  onOpen,
+  onRemove,
+}: {
+  ids: string[];
+  onOpen: (id: string) => void;
+  onRemove: (id: string) => void;
+}) {
+  const meals = ids.map((id) => getRecipe(id)).filter((recipe): recipe is Recipe => Boolean(recipe));
+  return (
+    <section className="no-print mt-10">
+      <h1 className="font-heading text-5xl tracking-tight">Saved meals</h1>
+      <p className="mt-3 max-w-xl text-muted-foreground">Favorites stay in this browser for the next search.</p>
+      {meals.length === 0 ? (
+        <p className="mt-8 rounded-3xl border bg-card p-6">Nothing saved yet. Use Save meal on a shortlist card or a recipe.</p>
+      ) : (
+        <div className="mt-6 grid gap-4">
+          {meals.map((recipe) => (
+            <article key={recipe.id} className="flex flex-wrap items-center justify-between gap-3 rounded-3xl border bg-card p-4">
+              <div>
+                <h2 className="font-heading text-2xl">{recipe.title}</h2>
+                <p className="text-sm text-muted-foreground">{recipe.summary}</p>
+              </div>
+              <div className="flex gap-2">
+                <Button className="rounded-full" onClick={() => onOpen(recipe.id)}>
+                  Open
+                </Button>
+                <Button variant="outline" className="rounded-full" onClick={() => onRemove(recipe.id)}>
+                  Remove
+                </Button>
+              </div>
+            </article>
+          ))}
+        </div>
+      )}
+    </section>
+  );
+}
+
+function MealCard({
+  hit,
+  onOpen,
+  onSave,
+  saved,
+  muted = false,
+}: {
+  hit: Hit;
+  onOpen: () => void;
+  onSave: () => void;
+  saved: boolean;
+  muted?: boolean;
+}) {
   return (
     <article className="grid gap-4 rounded-[1.6rem] border bg-card p-3 sm:grid-cols-[180px_1fr] sm:p-4">
       <Plate art={hit.recipe.art} className="h-36 w-full rounded-2xl sm:h-full" />
@@ -538,9 +831,12 @@ function MealCard({ hit, onOpen, muted = false }: { hit: Hit; onOpen: () => void
         <p className="mt-2 text-sm text-muted-foreground">
           {muted ? hit.misses.join(" ") : hit.reasons.join(" · ")}
         </p>
-        <div className="mt-4">
+        <div className="mt-4 flex flex-wrap gap-2">
           <Button variant={muted ? "outline" : "default"} className="rounded-full" onClick={onOpen}>
             {muted ? "Look anyway" : "Open recipe"}
+          </Button>
+          <Button variant="outline" className="rounded-full" onClick={onSave}>
+            {saved ? "Saved" : "Save meal"}
           </Button>
         </div>
       </div>

@@ -1,8 +1,8 @@
-import { HIGH_PROTEIN_G, LOW_CARB_G, LOW_FAT_G, TOLERANCE } from "@/lib/limits";
+import { HIGH_PROTEIN_G, LOW_CARB_G, LOW_FAT_G, MAX_DAILY_KCAL, MIN_DAILY_KCAL, TOLERANCE } from "@/lib/limits";
 import { nutritionFor } from "@/lib/nutrition";
-import { parseRequest } from "@/lib/parse";
+import { parseRequest, syncChips } from "@/lib/parse";
 import { PANTRY_GROUPS, recipes } from "@/lib/recipes";
-import type { Constraints, Nutrition, Recipe, Refusal, WarningNote } from "@/lib/types";
+import type { Constraints, Nutrition, Profile, Recipe, Refusal, WarningNote } from "@/lib/types";
 
 export type Hit = {
   recipe: Recipe;
@@ -210,7 +210,72 @@ function buildPlan(matches: Hit[], constraints: Constraints): PlanDay[] | null {
   return plan;
 }
 
-export function searchMeals(text: string, presets: string[] = [], pantry: string[] = []): MealSearch {
+function applySavedProfile(constraints: Constraints, warnings: WarningNote[], profile: Profile) {
+  let applied = false;
+  for (const diet of profile.diets) {
+    if (!constraints.diets.includes(diet)) {
+      constraints.diets.push(diet);
+      applied = true;
+    }
+  }
+  for (const allergy of profile.allergies) {
+    if (!constraints.allergies.includes(allergy)) {
+      constraints.allergies.push(allergy);
+      applied = true;
+    }
+  }
+
+  if (profile.allergies.length > 0 && !warnings.some((warning) => warning.title.includes("guarantee"))) {
+    warnings.push({
+      tone: "info",
+      title: "No identified allergen is not a guarantee",
+      message:
+        "Saved allergies are removed when they appear on an ingredient line. That is not a promise about brands, “may contain” statements, or cross-contact.",
+    });
+  }
+
+  if (constraints.plan && constraints.dailyCalories == null && profile.calorieTarget.trim()) {
+    const target = Number(profile.calorieTarget);
+    if (Number.isFinite(target) && target < MIN_DAILY_KCAL) {
+      return {
+        applied,
+        refusal: {
+          title: "That saved daily target is below the floor",
+          message: `${target.toLocaleString()} kcal a day is under ${MIN_DAILY_KCAL.toLocaleString()} kcal. Mise will not build a plan from it.`,
+          suggestion: `Raise the saved target to at least ${MIN_DAILY_KCAL.toLocaleString()} kcal, or clear it and type a different request.`,
+          suggestedText: "three meals per day, about 1,800 kcal",
+        } satisfies Refusal,
+      };
+    }
+    if (Number.isFinite(target) && target > MAX_DAILY_KCAL) {
+      return {
+        applied,
+        refusal: {
+          title: "That saved daily target is too high to plan",
+          message: `${target.toLocaleString()} kcal a day is over ${MAX_DAILY_KCAL.toLocaleString()} kcal, so this plan stops here.`,
+          suggestion: "Lower the saved calorie target.",
+        } satisfies Refusal,
+      };
+    }
+    if (Number.isFinite(target) && target >= MIN_DAILY_KCAL) {
+      constraints.dailyCalories = target;
+      applied = true;
+    }
+  }
+
+  syncChips(constraints);
+  if (applied) {
+    constraints.chips.push({ id: "saved-profile", label: "Includes saved preferences", tone: "hard" });
+  }
+  return { applied, refusal: null };
+}
+
+export function searchMeals(
+  text: string,
+  presets: string[] = [],
+  pantry: string[] = [],
+  profile?: Profile | null,
+): MealSearch {
   const parsed = parseRequest(text, presets, pantry);
   if (parsed.refusal) {
     return {
@@ -222,6 +287,21 @@ export function searchMeals(text: string, presets: string[] = [], pantry: string
       plan: null,
       pool: recipes.length,
     };
+  }
+
+  if (profile) {
+    const saved = applySavedProfile(parsed.constraints, parsed.warnings, profile);
+    if (saved.refusal) {
+      return {
+        constraints: parsed.constraints,
+        warnings: parsed.warnings,
+        refusal: saved.refusal,
+        matches: [],
+        near: [],
+        plan: null,
+        pool: recipes.length,
+      };
+    }
   }
 
   const hits = recipes.map((recipe) => assess(recipe, parsed.constraints));

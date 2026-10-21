@@ -133,3 +133,15 @@
     font-family: var(--font-heading);
   }
 }
+
+@media print {
+  body {
+    background: white;
+  }
+  .no-print {
+    display: none !important;
+  }
+  #recipe-sheet, #kitchen-sheet {
+    break-inside: avoid;
+  }
+}
