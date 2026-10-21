@@ -13,6 +13,8 @@ npm run dev -- --port 4721
 
 Open [http://127.0.0.1:4721](http://127.0.0.1:4721).
 
-Try “Low fat, high protein, vegetarian”, a five-day high-protein plan, or “200 calories per day”.
+The pages run in order: home, search, a photo list, then a recipe with a related YouTube video.
 
-Preferences, saved meals, and the kitchen list stay in the browser. A plan can merge its ingredients into one grocery list. Print or save PDF uses the browser print dialog. The app does not call a recipe API, read barcodes, or send what you type to a model.
+Try “Low fat, high protein, vegetarian”, or “200 calories per day”.
+
+From a recipe you can add ingredients to a kitchen list kept in this browser. The app does not call a recipe API, read barcodes, or send what you type to a model. A related YouTube video sits on each recipe; its method and portions can differ from the page.

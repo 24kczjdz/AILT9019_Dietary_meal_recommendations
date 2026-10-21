@@ -318,7 +318,7 @@ export function searchMeals(
     constraints: parsed.constraints,
     warnings: parsed.warnings,
     refusal: null,
-    matches: matches.slice(0, 6),
+    matches,
     near,
     plan: buildPlan(matches, parsed.constraints),
     pool: recipes.length,
