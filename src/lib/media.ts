@@ -104,5 +104,6 @@ export const media: Record<string, RecipeMedia> = {
 };
 
 export function photoSrc(id: string) {
-  return `/photos/${id}.jpg`;
+  const base = process.env.NEXT_PUBLIC_BASE_PATH ?? "";
+  return `${base}/photos/${id}.jpg`;
 }

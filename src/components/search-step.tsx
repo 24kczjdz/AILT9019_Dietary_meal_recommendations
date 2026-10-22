@@ -1,8 +1,8 @@
 "use client";
 
 import { useState } from "react";
-import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
+import { withBase } from "@/lib/base";
 
 const POINTS = [
   { label: "High protein", text: "high protein" },
@@ -16,7 +16,6 @@ const POINTS = [
 ];
 
 export function SearchStep() {
-  const router = useRouter();
   const [query, setQuery] = useState("");
 
   function toggle(text: string) {
@@ -36,22 +35,17 @@ export function SearchStep() {
       .includes(text.toLowerCase());
   }
 
-  function submit(event: React.FormEvent) {
-    event.preventDefault();
-    const q = query.trim();
-    router.push(q ? `/results?q=${encodeURIComponent(q)}` : "/results");
-  }
-
   return (
     <main className="mx-auto w-full max-w-xl flex-1 px-6 pb-16">
       <h1 className="font-heading text-4xl tracking-tight">What should the meal do?</h1>
-      <p className="mt-3 text-muted-foreground">Type a goal, or tap a few points below.</p>
-      <form onSubmit={submit} className="mt-8">
+      <p className="mt-3 text-muted-foreground">Type a goal, or tap a few points below. See meals opens the photo list.</p>
+      <form action={withBase("/results/")} method="get" className="mt-8">
         <label htmlFor="meal-search" className="sr-only">
           Dietary goal
         </label>
         <input
           id="meal-search"
+          name="q"
           value={query}
           onChange={(event) => setQuery(event.target.value)}
           placeholder="Low fat, high protein, vegetarian"

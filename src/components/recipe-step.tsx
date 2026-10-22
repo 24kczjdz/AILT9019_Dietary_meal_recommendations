@@ -1,10 +1,9 @@
 "use client";
 
-import { useMemo, useState } from "react";
-import Link from "next/link";
-import { useSearchParams } from "next/navigation";
+import { useEffect, useMemo, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
+import { withBase } from "@/lib/base";
 import { media, photoSrc } from "@/lib/media";
 import { displayedNutrition, formatAmount, scaleIngredients } from "@/lib/nutrition";
 import { getRecipe } from "@/lib/recipes";
@@ -12,9 +11,13 @@ import { linesFromRecipe, mergeLines } from "@/lib/shopping";
 import { loadKitchen, saveKitchen } from "@/lib/storage";
 
 export function RecipeStep({ id }: { id: string }) {
-  const params = useSearchParams();
-  const back = params.get("from") || "/results";
+  const [back, setBack] = useState(withBase("/results/"));
   const recipe = getRecipe(id);
+
+  useEffect(() => {
+    const from = new URLSearchParams(window.location.search).get("from");
+    if (from && from.startsWith("/") && !from.startsWith("//")) setBack(from);
+  }, []);
   const clip = media[id];
   const [checked, setChecked] = useState<Record<string, boolean>>({});
   const [added, setAdded] = useState(false);
@@ -31,9 +34,9 @@ export function RecipeStep({ id }: { id: string }) {
 
   return (
     <main className="mx-auto w-full max-w-3xl flex-1 px-5 pb-16">
-      <Link href={back} className="text-sm text-primary">
+      <a href={back} className="text-sm text-primary">
         Back to plates
-      </Link>
+      </a>
       <img src={photoSrc(recipe.id)} alt={recipe.title} className="mt-4 aspect-[16/10] w-full rounded-3xl object-cover" />
       <h1 className="mt-6 font-heading text-4xl tracking-tight sm:text-5xl">{recipe.title}</h1>
       <p className="mt-3 text-muted-foreground">{recipe.summary}</p>
@@ -111,7 +114,7 @@ export function RecipeStep({ id }: { id: string }) {
           {added ? "Added to kitchen" : "Add to kitchen list"}
         </Button>
         <Button variant="outline" className="rounded-full" asChild>
-          <Link href="/kitchen">Open kitchen list</Link>
+          <a href={withBase("/kitchen/")}>Open kitchen list</a>
         </Button>
       </div>
       <p className="mt-4 text-sm text-muted-foreground">{recipe.note}</p>

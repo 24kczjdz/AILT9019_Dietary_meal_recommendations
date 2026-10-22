@@ -1,0 +1,4 @@
+/search /search/ 301
+/results /results/ 301
+/kitchen /kitchen/ 301
+/recipe/:id /recipe/:id/ 301

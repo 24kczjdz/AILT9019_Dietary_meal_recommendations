@@ -1,5 +1,5 @@
-import Link from "next/link";
 import { Button } from "@/components/ui/button";
+import { withBase } from "@/lib/base";
 
 export default function Home() {
   return (
@@ -17,7 +17,7 @@ export default function Home() {
         <li>3 · Cook</li>
       </ol>
       <Button asChild className="mt-10 h-12 w-fit rounded-full px-8 text-base">
-        <Link href="/search">Get started</Link>
+        <a href={withBase("/search/")}>Get started</a>
       </Button>
     </main>
   );

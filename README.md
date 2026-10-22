@@ -8,13 +8,24 @@ This slice runs entirely in the browser from a local library of 24 plates. It do
 
 ```bash
 npm install
-npm run dev -- --port 4721
+npm run build
+npx serve out -l tcp://0.0.0.0:4721
 ```
 
 Open [http://127.0.0.1:4721](http://127.0.0.1:4721).
 
-The pages run in order: home, search, a photo list, then a recipe with a related YouTube video.
+The pages run in order: home, search, a photo list, then a recipe with a related YouTube video. Search submits a normal page load, and each plate is a link, so the list still opens a recipe when the dev-server reload socket is blocked.
 
 Try “Low fat, high protein, vegetarian”, or “200 calories per day”.
 
 From a recipe you can add ingredients to a kitchen list kept in this browser. The app does not call a recipe API, read barcodes, or send what you type to a model. A related YouTube video sits on each recipe; its method and portions can differ from the page.
+
+## Publish
+
+`npm run build` writes a static site to `out/`. Cloudflare Pages can serve that folder:
+
+```bash
+npx wrangler pages deploy out --project-name ailt9019-meals
+```
+
+GitHub Pages for this repository builds with `NEXT_PUBLIC_BASE_PATH=/AILT9019_Dietary_meal_recommendations`.
