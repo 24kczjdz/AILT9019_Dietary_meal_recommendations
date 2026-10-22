@@ -8,7 +8,7 @@ import { media, photoSrc } from "@/lib/media";
 import { displayedNutrition, formatAmount, scaleIngredients } from "@/lib/nutrition";
 import { getRecipe } from "@/lib/recipes";
 import { linesFromRecipe, mergeLines } from "@/lib/shopping";
-import { loadKitchen, saveKitchen } from "@/lib/storage";
+import { loadFavorites, loadKitchen, saveFavorites, saveKitchen } from "@/lib/storage";
 
 export function RecipeStep({ id }: { id: string }) {
   const [back, setBack] = useState(withBase("/results/"));
@@ -21,6 +21,11 @@ export function RecipeStep({ id }: { id: string }) {
   const clip = media[id];
   const [checked, setChecked] = useState<Record<string, boolean>>({});
   const [added, setAdded] = useState(false);
+  const [saved, setSaved] = useState(false);
+
+  useEffect(() => {
+    setSaved(loadFavorites().includes(id));
+  }, [id]);
   const detail = useMemo(() => (recipe ? displayedNutrition(scaleIngredients(recipe.ingredients, 1)) : null), [recipe]);
 
   if (!recipe || !detail || !clip) return null;
@@ -32,9 +37,16 @@ export function RecipeStep({ id }: { id: string }) {
     setAdded(true);
   }
 
+  function toggleSaved() {
+    const current = loadFavorites();
+    const next = current.includes(id) ? current.filter((item) => item !== id) : [...current, id];
+    saveFavorites(next);
+    setSaved(next.includes(id));
+  }
+
   return (
-    <main className="mx-auto w-full max-w-3xl flex-1 px-5 pb-16">
-      <a href={back} className="text-sm text-primary">
+    <main id="recipe-sheet" className="mx-auto w-full max-w-3xl flex-1 px-5 pb-16">
+      <a href={back} className="no-print text-sm text-primary">
         Back to plates
       </a>
       <img src={photoSrc(recipe.id)} alt={recipe.title} className="mt-4 aspect-[16/10] w-full rounded-3xl object-cover" />
@@ -54,10 +66,46 @@ export function RecipeStep({ id }: { id: string }) {
         ))}
       </dl>
       <p className="mt-3 text-sm text-muted-foreground">
-        Estimated for one serving from the ingredient list. Not medical advice.
+        Estimated for one serving from the ingredient list. The rows below use the same rounded figures as the totals. Not medical advice.
       </p>
+      <div className="mt-4 overflow-x-auto rounded-3xl border bg-card">
+        <table className="w-full min-w-[36rem] text-left text-sm">
+          <thead className="text-muted-foreground">
+            <tr>
+              <th className="px-3 py-3 font-medium">Ingredient</th>
+              <th className="px-3 py-3 font-medium">Amount</th>
+              <th className="px-3 py-3 font-medium">kcal</th>
+              <th className="px-3 py-3 font-medium">Protein</th>
+              <th className="px-3 py-3 font-medium">Fat</th>
+              <th className="px-3 py-3 font-medium">Carbs</th>
+            </tr>
+          </thead>
+          <tbody>
+            {detail.lines.map((item) => (
+              <tr key={`${item.key}-${item.unit}`} className="border-t">
+                <td className="px-3 py-2">{item.name}</td>
+                <td className="px-3 py-2">{formatAmount(item.quantity, item.unit)}</td>
+                <td className="px-3 py-2">{item.calories}</td>
+                <td className="px-3 py-2">{item.protein} g</td>
+                <td className="px-3 py-2">{item.fat} g</td>
+                <td className="px-3 py-2">{item.carbs} g</td>
+              </tr>
+            ))}
+          </tbody>
+          <tfoot>
+            <tr className="border-t font-medium">
+              <td className="px-3 py-3">Total</td>
+              <td className="px-3 py-3" />
+              <td className="px-3 py-3">{detail.total.calories}</td>
+              <td className="px-3 py-3">{detail.total.protein} g</td>
+              <td className="px-3 py-3">{detail.total.fat} g</td>
+              <td className="px-3 py-3">{detail.total.carbs} g</td>
+            </tr>
+          </tfoot>
+        </table>
+      </div>
 
-      <section className="mt-8">
+      <section className="no-print mt-8">
         <h2 className="font-heading text-2xl">Watch</h2>
         <p className="mt-1 text-sm text-muted-foreground">
           {clip.youtubeTitle}. A related YouTube video. Its method and portions can differ from this page.
@@ -109,12 +157,18 @@ export function RecipeStep({ id }: { id: string }) {
         </section>
       </div>
 
-      <div className="mt-8 flex flex-wrap gap-2">
+      <div className="no-print mt-8 flex flex-wrap gap-2">
         <Button className="rounded-full" onClick={addToKitchen}>
           {added ? "Added to kitchen" : "Add to kitchen list"}
         </Button>
         <Button variant="outline" className="rounded-full" asChild>
           <a href={withBase("/kitchen/")}>Open kitchen list</a>
+        </Button>
+        <Button variant="outline" className="rounded-full" onClick={toggleSaved}>
+          {saved ? "Saved" : "Save meal"}
+        </Button>
+        <Button variant="outline" className="rounded-full" onClick={() => window.print()}>
+          Print / Save PDF
         </Button>
       </div>
       <p className="mt-4 text-sm text-muted-foreground">{recipe.note}</p>
