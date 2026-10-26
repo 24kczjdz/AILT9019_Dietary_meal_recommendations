@@ -1,0 +1,4 @@
+https://github.com/24kczjdz/AILT9019_Dietary_meal_recommendations
+
+The repository is public. No login is required to read the code or the README.
+Live demo, no install: https://24kczjdz.github.io/AILT9019_Dietary_meal_recommendations/

@@ -1,10 +1,16 @@
 # Mise
 
-A small web demo that turns a dietary requirement into a shortlist of meals, then a recipe, a shopping checklist, and nutrition that adds up from the ingredient lines.
+A web demo that turns a dietary requirement into a shortlist of meals, then a recipe, a shopping checklist, and nutrition that adds up from the ingredient lines.
 
-This slice runs entirely in the browser from a local library of 24 plates. It does not call a recipe API or a language model. It is general food information, not medical advice. Requests under 1,200 kcal a day, and impossible plates such as 500 kcal with 100 g of protein, are refused.
+It runs from a local library of 24 plates. It does not call a recipe API or a language model. It is general food information, not medical advice.
 
-## Run it
+Repository: https://github.com/24kczjdz/AILT9019_Dietary_meal_recommendations
+
+The repository is public, so the course team can open the code without an account.
+
+## Setup
+
+Install Node.js 22, then from this folder:
 
 ```bash
 npm install
@@ -12,20 +18,35 @@ npm run build
 npx serve out -l tcp://0.0.0.0:4721
 ```
 
-Open [http://127.0.0.1:4721](http://127.0.0.1:4721).
+Open http://127.0.0.1:4721
 
-The pages run in order: home, search, a photo list, then a recipe with a related YouTube video. Search submits a normal page load, and each plate is a link, so the list still opens a recipe when the dev-server reload socket is blocked.
+To skip the local install, open the published copy:
 
-Try “Low fat, high protein, vegetarian”, or “200 calories per day”.
+https://24kczjdz.github.io/AILT9019_Dietary_meal_recommendations/
 
-From a recipe you can add ingredients to a kitchen list kept in this browser. The app does not call a recipe API, read barcodes, or send what you type to a model. A related YouTube video sits on each recipe; its method and portions can differ from the page.
+## Core path
 
-## Publish
+1. On the home page, choose **Get started**.
+2. Type a goal, such as `Low fat, high protein, vegetarian`. Filters and ingredients-at-home chips are optional. They stay selected on their own and are sent with the sentence.
+3. Choose **See meals**.
+4. The next page lists matching plates with a photo, a short description, calories, protein, a fit score, and why the plate matched.
+5. Choose **Open** on one plate.
+6. The recipe page shows the photo, nutrition totals, an ingredient table, a checklist, numbered steps, and a YouTube video. **Add to kitchen list** stores the ingredients in this browser.
 
-`npm run build` writes a static site to `out/`. Cloudflare Pages can serve that folder:
+**Preferences** on Search or Plates can store age, weight, height, activity, diet tags, and allergies. Saved diets and allergies apply on the next search. A saved calorie target is used only for a meal plan.
 
-```bash
-npx wrangler pages deploy out --project-name ailt9019-meals
-```
+## How to check the result
 
-GitHub Pages for this repository builds with `NEXT_PUBLIC_BASE_PATH=/AILT9019_Dietary_meal_recommendations`.
+Use these inputs and compare the screen with the expected result.
+
+| Input | Expected result |
+| --- | --- |
+| `Low fat, high protein, vegetarian` | A photo list of plates. Each one is vegetarian, at least about 30 g protein, and at most about 15 g fat. The page shows the tags it applied. |
+| Open any plate on that list | Amounts, steps, and a nutrition table. The ingredient rows use the same rounded figures as the totals, so the rows add up to the total. A YouTube player is on the page. Its method can differ from the written steps. |
+| `High-protein meal plan for five days` | Five days, three meals on day 1, and one merged grocery list for the whole plan. |
+| `200 calories per day` | A refusal. The daily target is below 1,200 kcal. |
+| `500 calories and 100 g protein` | A refusal. Those numbers do not fit in one plate. |
+
+A saved plan target under 1,200 kcal is also refused. Preferences explains that an allergy filter is not a guarantee about brands or cross-contact.
+
+Photo and barcode lookup is not available. Use the ingredient chips instead.
