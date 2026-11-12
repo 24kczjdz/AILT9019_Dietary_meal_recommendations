@@ -4,13 +4,14 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { ProfileControl } from "@/components/profile-control";
-import { rankPlates, type AiRanking, type AiScore } from "@/lib/ai";
+import { askLibraryTags, rankPlates, rememberSearchTags, type AiRanking, type AiScore } from "@/lib/ai";
 import { withBase } from "@/lib/base";
-import { searchMeals, type MealSearch, type Hit } from "@/lib/match";
+import { hardMisses, searchMeals, type MealSearch, type Hit } from "@/lib/match";
 import { photoSrc } from "@/lib/media";
 import { formatAmount } from "@/lib/nutrition";
 import { linesFromRecipe, mergeLines } from "@/lib/shopping";
 import { loadKitchen, loadProfile, saveKitchen } from "@/lib/storage";
+import { closestExcluded, foodVocabulary, orderByTags, parseTagRecommendation, rankingQuery } from "@/lib/tags";
 import type { Profile, ShoppingLine } from "@/lib/types";
 
 function resultsHref(query: string, presets: string[], pantry: string[]) {
@@ -56,6 +57,13 @@ function PlateCard({ hit, href, ai, pending }: { hit: Hit; href: string; ai?: Ai
   );
 }
 
+type TagState = {
+  query: string;
+  phrase: string;
+  tags: string[];
+  status: "idle" | "loading" | "ready" | "error";
+};
+
 export function ResultsStep() {
   const [query, setQuery] = useState("");
   const [presets, setPresets] = useState<string[]>([]);
@@ -66,6 +74,8 @@ export function ResultsStep() {
   const [ai, setAi] = useState<AiRanking | null>(null);
   const [aiBusy, setAiBusy] = useState(false);
   const [aiError, setAiError] = useState("");
+  const [tagState, setTagState] = useState<TagState>({ query: "", phrase: "", tags: [], status: "idle" });
+  const vocabulary = useMemo(() => foodVocabulary(), []);
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
@@ -81,6 +91,23 @@ export function ResultsStep() {
     [booted, query, presets, pantry, profile],
   );
 
+  const needsTags = booted && query.trim().length > 0 && !result.refusal;
+  const tagsReady =
+    !needsTags || (tagState.query === query && (tagState.status === "ready" || tagState.status === "error"));
+  const activeTags = tagsReady && tagState.status === "ready" && tagState.query === query ? tagState.tags : [];
+  const phrase = tagsReady && tagState.query === query ? tagState.phrase : "";
+
+  const ordered = useMemo(() => {
+    const grouped = orderByTags(result.matches, activeTags, ai?.scores);
+    return {
+      ...grouped,
+      leftOut: closestExcluded(result.blocked, activeTags),
+    };
+  }, [activeTags, ai?.scores, result.blocked, result.matches]);
+
+  const mainList = ordered.primary.length > 0 || activeTags.length === 0 ? ordered.primary : ordered.other;
+  const otherList = ordered.primary.length > 0 ? ordered.other : [];
+
   const back = resultsHref(query, presets, pantry);
   const planLines = useMemo(() => {
     if (!result.plan) return [];
@@ -91,11 +118,12 @@ export function ResultsStep() {
   }, [result.plan]);
 
   const aiRequest = useMemo(() => {
-    if (!booted || result.refusal || result.matches.length === 0) return null;
+    if (!booted || !tagsReady || result.refusal || result.matches.length === 0) return null;
     const hits = [...result.matches, ...result.near].slice(0, 24);
     return {
-      key: `${query}|${hits.map((hit) => `${hit.recipe.id}:${hit.score}`).join(",")}`,
+      key: `${query}|${activeTags.join(",")}|${hits.map((hit) => `${hit.recipe.id}:${hit.score}`).join(",")}`,
       query,
+      modelQuery: rankingQuery(query, phrase, activeTags),
       plates: hits.map((hit) => ({
         id: hit.recipe.id,
         title: hit.recipe.title,
@@ -108,19 +136,42 @@ export function ResultsStep() {
         reasons: hit.reasons,
       })),
     };
-  }, [booted, query, result]);
+  }, [activeTags, booted, phrase, query, result, tagsReady]);
 
   const aiRequestRef = useRef(aiRequest);
   aiRequestRef.current = aiRequest;
 
   useEffect(() => {
+    if (!needsTags) return;
+    let ignore = false;
+    setTagState({ query, phrase: "", tags: [], status: "loading" });
+    askLibraryTags(query, vocabulary)
+      .then((recommendation) => {
+        if (ignore) return;
+        const parsed = parseTagRecommendation(recommendation, vocabulary);
+        rememberSearchTags(query, parsed.phrase, parsed.tags);
+        setTagState({ query, phrase: parsed.phrase, tags: parsed.tags, status: "ready" });
+      })
+      .catch(() => {
+        if (!ignore) setTagState({ query, phrase: "", tags: [], status: "error" });
+      });
+    return () => {
+      ignore = true;
+    };
+  }, [needsTags, query, vocabulary]);
+
+  useEffect(() => {
     const current = aiRequestRef.current;
-    if (!current) return;
+    if (!current) {
+      setAi(null);
+      setAiBusy(false);
+      return;
+    }
     let ignore = false;
     setAi(null);
     setAiBusy(true);
     setAiError("");
-    rankPlates(current.query, current.plates)
+    rankPlates(current.query, current.plates, { modelQuery: current.modelQuery })
       .then((ranking) => {
         if (!ignore) setAi(ranking);
       })
@@ -138,10 +189,6 @@ export function ResultsStep() {
     };
   }, [aiRequest?.key]);
 
-  const shown = ai
-    ? [...result.matches].sort((a, b) => (ai.scores[b.recipe.id]?.score ?? 0) - (ai.scores[a.recipe.id]?.score ?? 0))
-    : result.matches;
-
   function addPlan() {
     saveKitchen(mergeLines(loadKitchen(), planLines));
     setAddedPlan(true);
@@ -153,7 +200,7 @@ export function ResultsStep() {
         <div>
           <h1 className="font-heading text-4xl tracking-tight">Plates</h1>
           <p className="mt-2 text-muted-foreground">
-            {query ? query : "Every plate in the library."} · {result.matches.length} meals
+            {booted ? `${query ? query : "Every plate in the library."} · ${result.matches.length} meals` : "Loading plates…"}
           </p>
         </div>
         <div className="flex items-center gap-3">
@@ -164,7 +211,7 @@ export function ResultsStep() {
         </div>
       </div>
 
-      {result.constraints.chips.length > 0 && (
+      {booted && result.constraints.chips.length > 0 && (
         <div className="mt-4 flex flex-wrap gap-2">
           {result.constraints.chips.map((chip) => (
             <Badge key={chip.id} variant={chip.tone === "warn" ? "destructive" : "secondary"} className="h-auto px-2 py-1 whitespace-normal">
@@ -174,25 +221,48 @@ export function ResultsStep() {
         </div>
       )}
 
-      {result.warnings.map((warning) => (
+      {booted && result.warnings.map((warning) => (
         <p key={warning.title} className="mt-4 max-w-2xl text-sm leading-relaxed text-muted-foreground">
           {warning.title}. {warning.message}
         </p>
       ))}
 
-      {!result.refusal && result.matches.length > 0 && (
+      {booted && !result.refusal && (needsTags || result.matches.length > 0) && (
         <section className="mt-6 max-w-3xl rounded-3xl border bg-card p-5">
-          <h2 className="font-heading text-2xl">AI recommend and score</h2>
-          <p className="mt-2 text-sm text-muted-foreground">
-            The model only ranks plates already in this list. It does not invent dishes or nutrition. Calories stay the ingredient totals.
-          </p>
-          {aiBusy && <p className="mt-3 text-sm text-muted-foreground">Scoring every plate…</p>}
+          <h2 className="font-heading text-2xl">{needsTags ? "Search tags" : "AI recommend and score"}</h2>
+          {needsTags && !tagsReady && <p className="mt-2 text-sm text-muted-foreground">Asking for a short phrase and search tags…</p>}
+          {needsTags && tagsReady && (phrase || activeTags.length > 0) && (
+            <div className="mt-3 flex flex-wrap gap-2">
+              {phrase && (
+                <Badge className="h-auto px-2 py-1 whitespace-normal">{phrase}</Badge>
+              )}
+              {activeTags.map((tag) => (
+                <Badge key={tag} variant="secondary" className="h-auto px-2 py-1 whitespace-normal">
+                  {tag}
+                </Badge>
+              ))}
+            </div>
+          )}
+          {needsTags && tagsReady && tagState.status === "error" && (
+            <p className="mt-2 text-sm text-muted-foreground">Search tags did not come back. Plates stay in fit order.</p>
+          )}
+          {needsTags && tagsReady && tagState.status === "ready" && activeTags.length === 0 && (
+            <p className="mt-2 text-sm text-muted-foreground">No library tags matched that request. Plates stay in fit order.</p>
+          )}
+          {result.matches.length > 0 && (
+            <p className="mt-2 text-sm text-muted-foreground">
+              The model only scores plates that already pass your rules. It does not invent dishes or nutrition. Calories stay the ingredient totals.
+            </p>
+          )}
+          {tagsReady && aiBusy && <p className="mt-3 text-sm text-muted-foreground">Scoring every plate…</p>}
           {aiError && <p className="mt-3 text-sm text-muted-foreground">{aiError}</p>}
           {ai?.recommendation && <p className="mt-3 leading-relaxed">{ai.recommendation}</p>}
         </section>
       )}
 
-      {result.refusal ? (
+      {!booted ? (
+        <p className="mt-8 text-muted-foreground">Loading plates…</p>
+      ) : needsTags && !tagsReady ? null : result.refusal ? (
         <section className="mt-8 max-w-xl rounded-3xl border bg-card p-6">
           <h2 className="font-heading text-3xl tracking-tight">{result.refusal.title}</h2>
           <p className="mt-3 leading-relaxed">{result.refusal.message}</p>
@@ -214,21 +284,66 @@ export function ResultsStep() {
           </a>
         </section>
       ) : (
-        <ul className="mt-8 grid gap-5 sm:grid-cols-2 lg:grid-cols-3">
-          {shown.map((hit) => (
-            <li key={hit.recipe.id}>
-              <PlateCard
-                hit={hit}
-                href={`${withBase(`/recipe/${hit.recipe.id}/`)}?from=${encodeURIComponent(back)}`}
-                ai={ai?.scores[hit.recipe.id]}
-                pending={aiBusy}
-              />
-            </li>
-          ))}
-        </ul>
+        <>
+          {activeTags.length > 0 && ordered.primary.length === 0 && (
+            <p className="mt-8 text-sm text-muted-foreground">No plate that passes your rules uses these tags. The list below still follows the saved rules.</p>
+          )}
+          <ul className="mt-8 grid gap-5 sm:grid-cols-2 lg:grid-cols-3">
+            {mainList.map((hit) => (
+              <li key={hit.recipe.id}>
+                <PlateCard
+                  hit={hit}
+                  href={`${withBase(`/recipe/${hit.recipe.id}/`)}?from=${encodeURIComponent(back)}`}
+                  ai={ai?.scores[hit.recipe.id]}
+                  pending={aiBusy}
+                />
+              </li>
+            ))}
+          </ul>
+        </>
       )}
 
-      {result.near.length > 0 && (
+      {tagsReady && ordered.leftOut.length > 0 && (
+        <section className="mt-12">
+          <h2 className="font-heading text-3xl tracking-tight">Left out by a saved rule</h2>
+          <p className="mt-2 max-w-2xl text-sm text-muted-foreground">
+            These are close to the search tags. A saved diet or allergy keeps them off the safe list.
+          </p>
+          <ul className="mt-5 grid gap-3 sm:grid-cols-2">
+            {ordered.leftOut.map((hit) => (
+              <li key={hit.recipe.id} className="rounded-3xl border bg-card p-4">
+                <p className="font-heading text-2xl tracking-tight">{hit.recipe.title}</p>
+                <p className="mt-2 text-sm">{hardMisses(hit).join(" · ")}</p>
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
+
+      {tagsReady && otherList.length > 0 && (
+        <section className="mt-12">
+          <h2 className="font-heading text-3xl tracking-tight">Other plates that pass your rules</h2>
+          <p className="mt-2 text-sm text-muted-foreground">
+            {ordered.primary.length === 0
+              ? "No plate that passes your rules uses these tags. These still follow the saved rules."
+              : "These clear the saved rules and do not use the search tags."}
+          </p>
+          <ul className="mt-5 grid gap-5 sm:grid-cols-2 lg:grid-cols-3">
+            {otherList.map((hit) => (
+              <li key={hit.recipe.id}>
+                <PlateCard
+                  hit={hit}
+                  href={`${withBase(`/recipe/${hit.recipe.id}/`)}?from=${encodeURIComponent(back)}`}
+                  ai={ai?.scores[hit.recipe.id]}
+                  pending={aiBusy}
+                />
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
+
+      {booted && tagsReady && result.near.length > 0 && (
         <section className="mt-12">
           <h2 className="font-heading text-3xl tracking-tight">Close, one rule off</h2>
           <p className="mt-2 text-sm text-muted-foreground">These miss exactly one soft rule. Hard rules, such as an allergy, stay off this list.</p>
@@ -247,7 +362,7 @@ export function ResultsStep() {
         </section>
       )}
 
-      {result.plan && (
+      {booted && tagsReady && result.plan && (
         <section className="mt-12">
           <h2 className="font-heading text-3xl tracking-tight">The plan</h2>
           <div className="mt-5 grid gap-4">

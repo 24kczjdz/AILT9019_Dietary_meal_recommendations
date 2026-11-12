@@ -3,7 +3,8 @@
 import { useEffect, useMemo, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
-import { rankPlates, readScore, type AiScore } from "@/lib/ai";
+import { rankPlates, readScore, readSearchTags, type AiScore } from "@/lib/ai";
+import { rankingQuery } from "@/lib/tags";
 import { withBase } from "@/lib/base";
 import { media, photoSrc } from "@/lib/media";
 import { displayedNutrition, formatAmount, scaleIngredients } from "@/lib/nutrition";
@@ -46,6 +47,7 @@ export function RecipeStep({ id }: { id: string }) {
       setAiPending(false);
       return;
     }
+    const savedTags = readSearchTags(mealQuery);
     let ignore = false;
     setAi(null);
     setAiPending(true);
@@ -61,7 +63,7 @@ export function RecipeStep({ id }: { id: string }) {
         libraryScore: 0,
         reasons: [],
       },
-    ])
+    ], savedTags ? { modelQuery: rankingQuery(mealQuery, savedTags.phrase, savedTags.tags) } : undefined)
       .then((ranking) => {
         if (!ignore) setAi(ranking.scores[recipe.id] ?? null);
       })

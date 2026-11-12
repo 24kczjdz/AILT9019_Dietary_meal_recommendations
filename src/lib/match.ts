@@ -32,9 +32,19 @@ export type MealSearch = {
   refusal: Refusal | null;
   matches: Hit[];
   near: Hit[];
+  /** Plates removed by a hard rule such as a diet or an allergy. */
+  blocked: Hit[];
   plan: PlanDay[] | null;
   pool: number;
 };
+
+export function isHardMiss(miss: string) {
+  return /Not |Contains |Shellfish|Not a /.test(miss);
+}
+
+export function hardMisses(hit: Hit) {
+  return hit.misses.filter(isHardMiss);
+}
 
 const SLOT_LABELS = ["Breakfast", "Lunch", "Dinner", "Snack"];
 
@@ -284,6 +294,7 @@ export function searchMeals(
       refusal: parsed.refusal,
       matches: [],
       near: [],
+      blocked: [],
       plan: null,
       pool: recipes.length,
     };
@@ -298,6 +309,7 @@ export function searchMeals(
         refusal: saved.refusal,
         matches: [],
         near: [],
+        blocked: [],
         plan: null,
         pool: recipes.length,
       };
@@ -309,10 +321,10 @@ export function searchMeals(
     .filter((hit) => hit.misses.length === 0)
     .sort((a, b) => b.score - a.score);
   const near = hits
-    .filter((hit) => hit.misses.length > 0 && !hit.misses.some((miss) => /Not |Contains |Shellfish|Not a /.test(miss)))
-    .filter((hit) => hit.misses.length === 1)
+    .filter((hit) => hit.misses.length === 1 && !hit.misses.some(isHardMiss))
     .sort((a, b) => b.score - a.score)
     .slice(0, 3);
+  const blocked = hits.filter((hit) => hit.misses.some(isHardMiss)).sort((a, b) => b.score - a.score);
 
   return {
     constraints: parsed.constraints,
@@ -320,6 +332,7 @@ export function searchMeals(
     refusal: null,
     matches,
     near,
+    blocked,
     plan: buildPlan(matches, parsed.constraints),
     pool: recipes.length,
   };

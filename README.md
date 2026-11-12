@@ -2,7 +2,7 @@
 
 A web demo that turns a dietary requirement into a shortlist of meals, then a recipe, a shopping checklist, and nutrition that adds up from the ingredient lines.
 
-It runs from a local library of 24 plates. Search, fit scores, and nutrition stay on that library. **Ask the model** sends those plates to a Cloudflare Worker, which asks the language model to rank them. It is general food information, not medical advice.
+It runs from a local library of 24 plates. Search, fit scores, and nutrition stay on that library. A free-text request asks a Cloudflare Worker for search tags, then for a score on the plates that already passed the rules. It is general food information, not medical advice.
 
 Repository: https://github.com/24kczjdz/AILT9019_Dietary_meal_recommendations
 
@@ -51,7 +51,7 @@ A saved plan target under 1,200 kcal is also refused. Preferences explains that 
 
 ## AI recommend and score
 
-Opening the plate list scores every plate on that page, including the close matches. Each card shows an **AI** mark, and the same mark is on the recipe page. The Worker at `https://mise-ai.mealmate-3036588333.workers.dev/ai` holds the model key and returns a short recommendation plus a 0–100 score for those recipe ids. It is not allowed to add dishes or replace the calorie totals. The library fit score still shows if the Worker does not answer.
+A free-text request such as “Italian food” asks the Worker at `https://mise-ai.mealmate-3036588333.workers.dev/ai` for a short phrase and a few search tags taken from words already in the 24-plate library. Plates that pass saved diets and allergies are ordered by how many of those tags appear in the title, summary, or ingredient names; plates with no tag hits are listed separately. Plates that match the tags but break a saved rule stay off that list, with a short note saying why. The same Worker then scores the plates that remain, and each of those cards and the recipe page show an AI mark. The model does not add dishes or change the calorie totals. The library fit score still shows if the Worker does not answer.
 
 To run a copy of that proxy on this computer instead, put the group key in `.env.local` (this file is not committed):
 
