@@ -2,7 +2,7 @@
 
 A web demo that turns a dietary requirement into a shortlist of meals, then a recipe, a shopping checklist, and nutrition that adds up from the ingredient lines.
 
-It runs from a local library of 24 plates. It does not call a recipe API or a language model. It is general food information, not medical advice.
+It runs from a local library of 24 plates. Search, fit scores, and nutrition stay on that library. **Ask the model** sends those plates to a Cloudflare Worker, which asks the language model to rank them. It is general food information, not medical advice.
 
 Repository: https://github.com/24kczjdz/AILT9019_Dietary_meal_recommendations
 
@@ -51,20 +51,20 @@ A saved plan target under 1,200 kcal is also refused. Preferences explains that 
 
 ## AI recommend and score
 
-On the plate list, **Ask the model** sends the plates already on screen to a local model server. The model returns a short recommendation and a 0–100 score for those recipe ids. It is not allowed to add dishes or replace the calorie totals.
+On the plate list, **Ask the model** sends the plates already on screen to `https://mise-ai.mealmate-3036588333.workers.dev/ai`. The Worker holds the model key and returns a short recommendation plus a 0–100 score for those recipe ids. It is not allowed to add dishes or replace the calorie totals. The same button works on the published GitHub Pages site. The library fit score still shows if the Worker does not answer.
 
-Put the group key in `.env.local` (this file is not committed):
+To run a copy of that proxy on this computer instead, put the group key in `.env.local` (this file is not committed):
 
 ```bash
 cp .env.example .env.local
 ```
 
-Set `AI_API_KEY` in that file, then in a second terminal:
+Set `AI_API_KEY` in that file, then:
 
 ```bash
 npm run ai
 ```
 
-Open the local site and use **Ask the model**. The published GitHub Pages copy cannot see that key, so the button only works on your computer while `npm run ai` is running. The library fit score still shows either way.
+Build with `NEXT_PUBLIC_AI_URL=http://127.0.0.1:4722/ai` if you want the site to call that local server.
 
 Photo and barcode lookup is not available. Use the ingredient chips instead.

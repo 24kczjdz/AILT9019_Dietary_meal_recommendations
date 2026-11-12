@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { ProfileControl } from "@/components/profile-control";
+import { AI_ENDPOINT } from "@/lib/ai";
 import { withBase } from "@/lib/base";
 import { searchMeals, type MealSearch, type Hit } from "@/lib/match";
 import { photoSrc } from "@/lib/media";
@@ -90,7 +91,7 @@ export function ResultsStep() {
     setAiBusy(true);
     setAiError("");
     try {
-      const response = await fetch("http://127.0.0.1:4722/ai", {
+      const response = await fetch(AI_ENDPOINT, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -116,11 +117,7 @@ export function ResultsStep() {
     } catch (error) {
       setAi(null);
       const message = error instanceof Error ? error.message : "";
-      setAiError(
-        message && message !== "Failed to fetch"
-          ? message
-          : "The model server is not running. On this computer, run npm run ai, then ask again.",
-      );
+      setAiError(message && message !== "Failed to fetch" ? message : "The scoring service did not answer. Try again in a moment.");
     } finally {
       setAiBusy(false);
     }
