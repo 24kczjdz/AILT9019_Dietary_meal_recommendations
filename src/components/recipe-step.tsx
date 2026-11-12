@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
+import { rankPlates, readScore, type AiScore } from "@/lib/ai";
 import { withBase } from "@/lib/base";
 import { media, photoSrc } from "@/lib/media";
 import { displayedNutrition, formatAmount, scaleIngredients } from "@/lib/nutrition";
@@ -22,11 +23,58 @@ export function RecipeStep({ id }: { id: string }) {
   const [checked, setChecked] = useState<Record<string, boolean>>({});
   const [added, setAdded] = useState(false);
   const [saved, setSaved] = useState(false);
+  const [ai, setAi] = useState<AiScore | null>(null);
+  const [aiPending, setAiPending] = useState(false);
 
   useEffect(() => {
     setSaved(loadFavorites().includes(id));
   }, [id]);
   const detail = useMemo(() => (recipe ? displayedNutrition(scaleIngredients(recipe.ingredients, 1)) : null), [recipe]);
+
+  useEffect(() => {
+    if (!recipe || !detail) return;
+    const from = new URLSearchParams(window.location.search).get("from") ?? "";
+    let mealQuery = recipe.title;
+    try {
+      mealQuery = new URL(from, window.location.origin).searchParams.get("q") || recipe.title;
+    } catch {
+      mealQuery = recipe.title;
+    }
+    const stored = readScore(recipe.id, mealQuery);
+    if (stored) {
+      setAi(stored);
+      setAiPending(false);
+      return;
+    }
+    let ignore = false;
+    setAi(null);
+    setAiPending(true);
+    rankPlates(mealQuery, [
+      {
+        id: recipe.id,
+        title: recipe.title,
+        summary: recipe.summary,
+        calories: detail.total.calories,
+        protein: detail.total.protein,
+        fat: detail.total.fat,
+        carbs: detail.total.carbs,
+        libraryScore: 0,
+        reasons: [],
+      },
+    ])
+      .then((ranking) => {
+        if (!ignore) setAi(ranking.scores[recipe.id] ?? null);
+      })
+      .catch(() => {
+        if (!ignore) setAi(null);
+      })
+      .finally(() => {
+        if (!ignore) setAiPending(false);
+      });
+    return () => {
+      ignore = true;
+    };
+  }, [detail, recipe]);
 
   if (!recipe || !detail || !clip) return null;
 
@@ -49,9 +97,22 @@ export function RecipeStep({ id }: { id: string }) {
       <a href={back} className="no-print text-sm text-primary">
         Back to plates
       </a>
-      <img src={photoSrc(recipe.id)} alt={recipe.title} className="mt-4 aspect-[16/10] w-full rounded-3xl object-cover" />
+      <div className="relative mt-4">
+        <img src={photoSrc(recipe.id)} alt={recipe.title} className="aspect-[16/10] w-full rounded-3xl object-cover" />
+        {(ai || aiPending) && (
+          <span className="absolute top-3 left-3 rounded-full bg-background px-3 py-1 text-sm font-medium shadow-sm">
+            {ai ? `AI Score ${ai.score}` : "AI Score …"}
+          </span>
+        )}
+      </div>
       <h1 className="mt-6 font-heading text-4xl tracking-tight sm:text-5xl">{recipe.title}</h1>
       <p className="mt-3 text-muted-foreground">{recipe.summary}</p>
+      {(ai || aiPending) && (
+        <p className="mt-3 text-sm">
+          {ai ? `AI Score ${ai.score}` : "AI Score …"}
+          {ai?.reason ? `. ${ai.reason}` : ""}
+        </p>
+      )}
       <dl className="mt-5 grid grid-cols-2 gap-2 sm:grid-cols-4">
         {[
           ["Calories", `${detail.total.calories}`],

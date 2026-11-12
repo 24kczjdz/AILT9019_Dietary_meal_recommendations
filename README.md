@@ -51,7 +51,7 @@ A saved plan target under 1,200 kcal is also refused. Preferences explains that 
 
 ## AI recommend and score
 
-On the plate list, **Ask the model** sends the plates already on screen to `https://mise-ai.mealmate-3036588333.workers.dev/ai`. The Worker holds the model key and returns a short recommendation plus a 0–100 score for those recipe ids. It is not allowed to add dishes or replace the calorie totals. The same button works on the published GitHub Pages site. The library fit score still shows if the Worker does not answer.
+Opening the plate list scores every plate on that page, including the close matches. Each card shows an **AI** mark, and the same mark is on the recipe page. The Worker at `https://mise-ai.mealmate-3036588333.workers.dev/ai` holds the model key and returns a short recommendation plus a 0–100 score for those recipe ids. It is not allowed to add dishes or replace the calorie totals. The library fit score still shows if the Worker does not answer.
 
 To run a copy of that proxy on this computer instead, put the group key in `.env.local` (this file is not committed):
 

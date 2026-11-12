@@ -1,10 +1,10 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { ProfileControl } from "@/components/profile-control";
-import { AI_ENDPOINT } from "@/lib/ai";
+import { rankPlates, type AiRanking, type AiScore } from "@/lib/ai";
 import { withBase } from "@/lib/base";
 import { searchMeals, type MealSearch, type Hit } from "@/lib/match";
 import { photoSrc } from "@/lib/media";
@@ -22,10 +22,22 @@ function resultsHref(query: string, presets: string[], pantry: string[]) {
   return withBase(`/results/${search ? `?${search}` : ""}`);
 }
 
-function PlateCard({ hit, href, ai }: { hit: Hit; href: string; ai?: { score: number; reason: string } }) {
+function ScoreMark({ ai, pending }: { ai?: AiScore; pending: boolean }) {
+  if (!ai && !pending) return null;
+  return (
+    <span className="absolute top-3 left-3 rounded-full bg-background px-3 py-1 text-sm font-medium shadow-sm">
+      {ai ? `AI Score ${ai.score}` : "AI Score …"}
+    </span>
+  );
+}
+
+function PlateCard({ hit, href, ai, pending }: { hit: Hit; href: string; ai?: AiScore; pending: boolean }) {
   return (
     <a href={href} className="block overflow-hidden rounded-3xl border bg-card">
-      <img src={photoSrc(hit.recipe.id)} alt={hit.recipe.title} className="aspect-[4/3] w-full object-cover" />
+      <div className="relative">
+        <img src={photoSrc(hit.recipe.id)} alt={hit.recipe.title} className="aspect-[4/3] w-full object-cover" />
+        <ScoreMark ai={ai} pending={pending} />
+      </div>
       <div className="p-4">
         <div className="flex items-start justify-between gap-3">
           <h2 className="font-heading text-2xl tracking-tight">{hit.recipe.title}</h2>
@@ -35,7 +47,7 @@ function PlateCard({ hit, href, ai }: { hit: Hit; href: string; ai?: { score: nu
         <p className="mt-2 text-sm text-muted-foreground">
           {hit.nutrition.calories} kcal · {hit.nutrition.protein} g protein · {hit.recipe.minutes} min
         </p>
-        <p className="mt-2 text-sm">Fit {hit.score}{ai ? ` · AI score ${ai.score}` : ""}</p>
+        <p className="mt-2 text-sm">Fit {hit.score}{ai ? ` · AI Score ${ai.score}` : pending ? " · scoring" : ""}</p>
         {ai?.reason && <p className="mt-1 text-sm">{ai.reason}</p>}
         {hit.reasons.length > 0 && <p className="mt-1 text-sm text-muted-foreground">{hit.reasons.join(" · ")}</p>}
         {hit.misses.length > 0 && <p className="mt-1 text-sm text-muted-foreground">{hit.misses.join(" · ")}</p>}
@@ -51,7 +63,7 @@ export function ResultsStep() {
   const [profile, setProfile] = useState<Profile | null>(null);
   const [booted, setBooted] = useState(false);
   const [addedPlan, setAddedPlan] = useState(false);
-  const [ai, setAi] = useState<{ recommendation: string; scores: Record<string, { score: number; reason: string }> } | null>(null);
+  const [ai, setAi] = useState<AiRanking | null>(null);
   const [aiBusy, setAiBusy] = useState(false);
   const [aiError, setAiError] = useState("");
 
@@ -78,50 +90,57 @@ export function ResultsStep() {
     );
   }, [result.plan]);
 
+  const aiRequest = useMemo(() => {
+    if (!booted || result.refusal || result.matches.length === 0) return null;
+    const hits = [...result.matches, ...result.near].slice(0, 24);
+    return {
+      key: `${query}|${hits.map((hit) => `${hit.recipe.id}:${hit.score}`).join(",")}`,
+      query,
+      plates: hits.map((hit) => ({
+        id: hit.recipe.id,
+        title: hit.recipe.title,
+        summary: hit.recipe.summary,
+        calories: hit.nutrition.calories,
+        protein: hit.nutrition.protein,
+        fat: hit.nutrition.fat,
+        carbs: hit.nutrition.carbs,
+        libraryScore: hit.score,
+        reasons: hit.reasons,
+      })),
+    };
+  }, [booted, query, result]);
+
+  const aiRequestRef = useRef(aiRequest);
+  aiRequestRef.current = aiRequest;
+
   useEffect(() => {
+    const current = aiRequestRef.current;
+    if (!current) return;
+    let ignore = false;
     setAi(null);
+    setAiBusy(true);
     setAiError("");
-  }, [query, presets, pantry, profile]);
+    rankPlates(current.query, current.plates)
+      .then((ranking) => {
+        if (!ignore) setAi(ranking);
+      })
+      .catch((error: unknown) => {
+        if (ignore) return;
+        setAi(null);
+        const message = error instanceof Error ? error.message : "";
+        setAiError(message && message !== "Failed to fetch" ? message : "The scoring service did not answer. Try again in a moment.");
+      })
+      .finally(() => {
+        if (!ignore) setAiBusy(false);
+      });
+    return () => {
+      ignore = true;
+    };
+  }, [aiRequest?.key]);
 
   const shown = ai
     ? [...result.matches].sort((a, b) => (ai.scores[b.recipe.id]?.score ?? 0) - (ai.scores[a.recipe.id]?.score ?? 0))
     : result.matches;
-
-  async function askModel() {
-    setAiBusy(true);
-    setAiError("");
-    try {
-      const response = await fetch(AI_ENDPOINT, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          query: query || "a suitable meal",
-          plates: result.matches.map((hit) => ({
-            id: hit.recipe.id,
-            title: hit.recipe.title,
-            summary: hit.recipe.summary,
-            calories: hit.nutrition.calories,
-            protein: hit.nutrition.protein,
-            fat: hit.nutrition.fat,
-            carbs: hit.nutrition.carbs,
-            libraryScore: hit.score,
-            reasons: hit.reasons,
-          })),
-        }),
-      });
-      const payload = await response.json();
-      if (!response.ok) throw new Error(payload.error || "The model did not answer.");
-      const scores: Record<string, { score: number; reason: string }> = {};
-      for (const item of payload.scores ?? []) scores[item.id] = { score: item.score, reason: item.reason };
-      setAi({ recommendation: String(payload.recommendation || ""), scores });
-    } catch (error) {
-      setAi(null);
-      const message = error instanceof Error ? error.message : "";
-      setAiError(message && message !== "Failed to fetch" ? message : "The scoring service did not answer. Try again in a moment.");
-    } finally {
-      setAiBusy(false);
-    }
-  }
 
   function addPlan() {
     saveKitchen(mergeLines(loadKitchen(), planLines));
@@ -167,9 +186,7 @@ export function ResultsStep() {
           <p className="mt-2 text-sm text-muted-foreground">
             The model only ranks plates already in this list. It does not invent dishes or nutrition. Calories stay the ingredient totals.
           </p>
-          <Button className="mt-4 rounded-full" onClick={askModel} disabled={aiBusy}>
-            {aiBusy ? "Scoring…" : "Ask the model"}
-          </Button>
+          {aiBusy && <p className="mt-3 text-sm text-muted-foreground">Scoring every plate…</p>}
           {aiError && <p className="mt-3 text-sm text-muted-foreground">{aiError}</p>}
           {ai?.recommendation && <p className="mt-3 leading-relaxed">{ai.recommendation}</p>}
         </section>
@@ -204,6 +221,7 @@ export function ResultsStep() {
                 hit={hit}
                 href={`${withBase(`/recipe/${hit.recipe.id}/`)}?from=${encodeURIComponent(back)}`}
                 ai={ai?.scores[hit.recipe.id]}
+                pending={aiBusy}
               />
             </li>
           ))}
@@ -217,7 +235,12 @@ export function ResultsStep() {
           <ul className="mt-5 grid gap-5 sm:grid-cols-2 lg:grid-cols-3">
             {result.near.map((hit) => (
               <li key={hit.recipe.id}>
-                <PlateCard hit={hit} href={`${withBase(`/recipe/${hit.recipe.id}/`)}?from=${encodeURIComponent(back)}`} />
+                <PlateCard
+                  hit={hit}
+                  href={`${withBase(`/recipe/${hit.recipe.id}/`)}?from=${encodeURIComponent(back)}`}
+                  ai={ai?.scores[hit.recipe.id]}
+                  pending={aiBusy}
+                />
               </li>
             ))}
           </ul>
@@ -245,6 +268,7 @@ export function ResultsStep() {
                         {" "}
                         · {meal.nutrition.calories} kcal
                         {meal.scale !== 1 ? ` · ${meal.scale}×` : ""}
+                        {ai?.scores[meal.hit.recipe.id] ? ` · AI Score ${ai.scores[meal.hit.recipe.id].score}` : ""}
                       </span>
                     </li>
                   ))}
