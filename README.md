@@ -49,4 +49,22 @@ Use these inputs and compare the screen with the expected result.
 
 A saved plan target under 1,200 kcal is also refused. Preferences explains that an allergy filter is not a guarantee about brands or cross-contact.
 
+## AI recommend and score
+
+On the plate list, **Ask the model** sends the plates already on screen to a local model server. The model returns a short recommendation and a 0–100 score for those recipe ids. It is not allowed to add dishes or replace the calorie totals.
+
+Put the group key in `.env.local` (this file is not committed):
+
+```bash
+cp .env.example .env.local
+```
+
+Set `AI_API_KEY` in that file, then in a second terminal:
+
+```bash
+npm run ai
+```
+
+Open the local site and use **Ask the model**. The published GitHub Pages copy cannot see that key, so the button only works on your computer while `npm run ai` is running. The library fit score still shows either way.
+
 Photo and barcode lookup is not available. Use the ingredient chips instead.

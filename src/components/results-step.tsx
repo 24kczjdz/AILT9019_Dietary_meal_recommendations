@@ -21,7 +21,7 @@ function resultsHref(query: string, presets: string[], pantry: string[]) {
   return withBase(`/results/${search ? `?${search}` : ""}`);
 }
 
-function PlateCard({ hit, href }: { hit: Hit; href: string }) {
+function PlateCard({ hit, href, ai }: { hit: Hit; href: string; ai?: { score: number; reason: string } }) {
   return (
     <a href={href} className="block overflow-hidden rounded-3xl border bg-card">
       <img src={photoSrc(hit.recipe.id)} alt={hit.recipe.title} className="aspect-[4/3] w-full object-cover" />
@@ -34,7 +34,8 @@ function PlateCard({ hit, href }: { hit: Hit; href: string }) {
         <p className="mt-2 text-sm text-muted-foreground">
           {hit.nutrition.calories} kcal · {hit.nutrition.protein} g protein · {hit.recipe.minutes} min
         </p>
-        <p className="mt-2 text-sm">Fit {hit.score}</p>
+        <p className="mt-2 text-sm">Fit {hit.score}{ai ? ` · AI score ${ai.score}` : ""}</p>
+        {ai?.reason && <p className="mt-1 text-sm">{ai.reason}</p>}
         {hit.reasons.length > 0 && <p className="mt-1 text-sm text-muted-foreground">{hit.reasons.join(" · ")}</p>}
         {hit.misses.length > 0 && <p className="mt-1 text-sm text-muted-foreground">{hit.misses.join(" · ")}</p>}
       </div>
@@ -49,6 +50,9 @@ export function ResultsStep() {
   const [profile, setProfile] = useState<Profile | null>(null);
   const [booted, setBooted] = useState(false);
   const [addedPlan, setAddedPlan] = useState(false);
+  const [ai, setAi] = useState<{ recommendation: string; scores: Record<string, { score: number; reason: string }> } | null>(null);
+  const [aiBusy, setAiBusy] = useState(false);
+  const [aiError, setAiError] = useState("");
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
@@ -72,6 +76,55 @@ export function ResultsStep() {
       [],
     );
   }, [result.plan]);
+
+  useEffect(() => {
+    setAi(null);
+    setAiError("");
+  }, [query, presets, pantry, profile]);
+
+  const shown = ai
+    ? [...result.matches].sort((a, b) => (ai.scores[b.recipe.id]?.score ?? 0) - (ai.scores[a.recipe.id]?.score ?? 0))
+    : result.matches;
+
+  async function askModel() {
+    setAiBusy(true);
+    setAiError("");
+    try {
+      const response = await fetch("http://127.0.0.1:4722/ai", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          query: query || "a suitable meal",
+          plates: result.matches.map((hit) => ({
+            id: hit.recipe.id,
+            title: hit.recipe.title,
+            summary: hit.recipe.summary,
+            calories: hit.nutrition.calories,
+            protein: hit.nutrition.protein,
+            fat: hit.nutrition.fat,
+            carbs: hit.nutrition.carbs,
+            libraryScore: hit.score,
+            reasons: hit.reasons,
+          })),
+        }),
+      });
+      const payload = await response.json();
+      if (!response.ok) throw new Error(payload.error || "The model did not answer.");
+      const scores: Record<string, { score: number; reason: string }> = {};
+      for (const item of payload.scores ?? []) scores[item.id] = { score: item.score, reason: item.reason };
+      setAi({ recommendation: String(payload.recommendation || ""), scores });
+    } catch (error) {
+      setAi(null);
+      const message = error instanceof Error ? error.message : "";
+      setAiError(
+        message && message !== "Failed to fetch"
+          ? message
+          : "The model server is not running. On this computer, run npm run ai, then ask again.",
+      );
+    } finally {
+      setAiBusy(false);
+    }
+  }
 
   function addPlan() {
     saveKitchen(mergeLines(loadKitchen(), planLines));
@@ -111,6 +164,20 @@ export function ResultsStep() {
         </p>
       ))}
 
+      {!result.refusal && result.matches.length > 0 && (
+        <section className="mt-6 max-w-3xl rounded-3xl border bg-card p-5">
+          <h2 className="font-heading text-2xl">AI recommend and score</h2>
+          <p className="mt-2 text-sm text-muted-foreground">
+            The model only ranks plates already in this list. It does not invent dishes or nutrition. Calories stay the ingredient totals.
+          </p>
+          <Button className="mt-4 rounded-full" onClick={askModel} disabled={aiBusy}>
+            {aiBusy ? "Scoring…" : "Ask the model"}
+          </Button>
+          {aiError && <p className="mt-3 text-sm text-muted-foreground">{aiError}</p>}
+          {ai?.recommendation && <p className="mt-3 leading-relaxed">{ai.recommendation}</p>}
+        </section>
+      )}
+
       {result.refusal ? (
         <section className="mt-8 max-w-xl rounded-3xl border bg-card p-6">
           <h2 className="font-heading text-3xl tracking-tight">{result.refusal.title}</h2>
@@ -134,9 +201,13 @@ export function ResultsStep() {
         </section>
       ) : (
         <ul className="mt-8 grid gap-5 sm:grid-cols-2 lg:grid-cols-3">
-          {result.matches.map((hit) => (
+          {shown.map((hit) => (
             <li key={hit.recipe.id}>
-              <PlateCard hit={hit} href={`${withBase(`/recipe/${hit.recipe.id}/`)}?from=${encodeURIComponent(back)}`} />
+              <PlateCard
+                hit={hit}
+                href={`${withBase(`/recipe/${hit.recipe.id}/`)}?from=${encodeURIComponent(back)}`}
+                ai={ai?.scores[hit.recipe.id]}
+              />
             </li>
           ))}
         </ul>
